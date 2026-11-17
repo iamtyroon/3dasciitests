@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ultimate ASCII Rose</title>
+<style>
+:root{color-scheme:dark;--bg:#07060a;--ac:#ff4a66;--fg:#f3dfe4;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:var(--bg)}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--fg);font-family:'Courier New',ui-monospace,monospace;overflow:hidden;touch-action:none;background:radial-gradient(ellipse at 50% 40%,#1a0d14 0%,var(--bg) 70%)}
+#rose{white-space:pre;line-height:1;user-select:none;cursor:grab;font-weight:bold;transition:filter .3s}
+#rose.glow{filter:drop-shadow(0 0 7px rgba(255,80,110,.35))}
+#rose:active{cursor:grabbing}
+.controls{margin-top:10px;display:flex;flex-wrap:wrap;justify-content:center;gap:10px;padding:0 10px}
+button{padding:7px 14px;background:transparent;border:1px solid var(--ac);color:var(--ac);border-radius:4px;cursor:pointer;font:inherit;font-size:13px;transition:all .25s}
+button:hover{background:var(--ac);color:#000}
+.hint{margin-top:8px;font-size:12px;opacity:.6}
+</style>
+</head>
+<body>
+<div id="rose" class="glow"></div>
+<div class="controls">
+<button id="bSpin">Pause spin</button><button id="bTheme">Theme: Crimson</button><button id="bGlow">Glow: on</button><button id="bReset">Reset view</button>
+</div>
+<div class="hint">Drag to rotate · Scroll or pinch to zoom</div>
+<script>
+// ---------- palettes ----------
+const hex2=h=>[1,3,5].map(i=>parseInt(h.substr(i,2),16));
+function ramp(stops,n){const s=stops.map(hex2),o=[];for(let i=0;i<n;i++){const t=i/(n-1)*(s.length-1),k=Math.min(s.length-2,Math.floor(t)),f=t-k;o.push('#'+[0,1,2].map(c=>Math.round(s[k][c]+(s[k+1][c]-s[k][c])*f).toString(16).padStart(2,'0')).join(''))}return o}
+const NP=36;
+const THEMES=[
+['Crimson',['#12010a','#4a0516','#8f0a24','#d11a3a','#ff4a66','#ffb3c1','#fff0f3']],
+['Blush',['#1a0612','#5c1238','#a8286a','#e0559a','#ff8fc2','#ffd0e6','#fff5fa']],
+['Gold',['#1a0d00','#5a2a02','#a85a05','#e8960f','#ffc83a','#ffe99a','#fffbe6']],
+['Violet',['#080618','#251256','#4a24a0','#7a45d6','#a98aff','#d8c7ff','#f6f1ff']],
+['Ice',['#0a0f18','#2a3a52','#6a82a6','#a9bfdc','#d8e6f7','#f2f8ff','#ffffff']]
+].map(t=>({name:t[0],pal:ramp(t[1],NP),ac:t[1][4]}));
+const LEAF=ramp(['#020a05','#0b2a17','#14502a','#237a41','#3cae63','#7ee09b','#d4ffe2'],NP);
+const CH=' .,-:;~=+*xzXO#%@';
+
+// ---------- geometry (parametric surface meshes with true normals) ----------
+const G={x:[],y:[],z:[],nx:[],ny:[],nz:[],t:[],ao:[],tn:[]};
+function surf(nu,nv,fn,type){
+  const g=[];
+  for(let i=0;i<nu;i++){const r=[];for(let j=0;j<nv;j++)r.push(fn(i,j,i/(nu-1),j/(nv-1)));g.push(r)}
+  for(let i=0;i<nu;i++)for(let j=0;j<nv;j++){
+    const a=g[Math.max(0,i-1)][j],b=g[Math.min(nu-1,i+1)][j],c=g[i][Math.max(0,j-1)],d=g[i][Math.min(nv-1,j+1)];
+    const u=[b[0]-a[0],b[1]-a[1],b[2]-a[2]],w=[d[0]-c[0],d[1]-c[1],d[2]-c[2]];
+    let X=u[1]*w[2]-u[2]*w[1],Y=u[2]*w[0]-u[0]*w[2],Z=u[0]*w[1]-u[1]*w[0];
+    const l=Math.hypot(X,Y,Z);if(l<1e-9){X=0;Y=1;Z=0}else{X/=l;Y/=l;Z/=l}
+    const p=g[i][j];
+    G.x.push(p[0]);G.y.push(p[1]);G.z.push(p[2]);G.nx.push(X);G.ny.push(Y);G.nz.push(Z);G.t.push(type);G.ao.push(p[3]);G.tn.push(p[4])
+  }
+}
+const nrm=v=>{const l=Math.hypot(...v)||1;return v.map(a=>a/l)};
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+
+// Petals: golden-angle phyllotaxis, inner petals wrap a closed bud, outer ones open and curl back
+const N=46,GA=2.39996;
+for(let k=0;k<N;k++){
+  const f=k/(N-1),ff=Math.pow(f,1.1);
+  const a0=0.1+0.5*ff,b=-0.55+1.75*ff,c=0.6*f,L=0.5+0.62*Math.pow(f,0.8),r0=0.02+0.12*f,y0=-0.3*f*f;
+  const Ha=1.5-0.8*f,ak=k*GA,RT=[0],YT=[0],M=40;
+  let r=0,y=0;
+  for(let s=0;s<M;s++){const sv=(s+.5)/M,th=a0+b*sv+c*sv*sv*sv;r+=L*Math.sin(th)/M;y+=L*Math.cos(th)/M;RT.push(r);YT.push(y)}
+  const prof=sv=>{const q=Math.max(0,Math.min(1,sv))*M,i=Math.min(M-1,Math.floor(q)),t=q-i;return[RT[i]+(RT[i+1]-RT[i])*t,YT[i]+(YT[i+1]-YT[i])*t]};
+  surf(30,40,(i,j,u,v)=>{
+    const t=v*2-1,at=Math.abs(t),se=u*(1-0.3*Math.pow(at,2.2)),[pr,py]=prof(se);
+    const ha=Ha*Math.pow(Math.sin(Math.min(1,se*1.1+0.04)*1.5708),0.5),ph=ak+t*ha;
+    const R=Math.max(0.012,r0+pr)+0.16*Math.pow(at,3)*se*se*(0.4+f)+0.03*Math.sin(t*8+k*1.7)*se*se*f;
+    const Y=y0+py+0.05*Math.sin(t*6+k)*se*f;
+    const ao=(0.28+0.72*Math.pow(se,0.55))*(0.55+0.45*f)+0.25*Math.pow(at,5)*se+0.15*Math.pow(se,6);
+    return[R*Math.cos(ph),Y,R*Math.sin(ph),ao,Math.sin(k*12.9)*0.5]
+  },0);
+}
+// Sepals
+for(let s=0;s<5;s++){const a=s*Math.PI*2/5+0.3;
+  surf(18,10,(i,j,u,v)=>{const t=v*2-1,r=0.1+0.62*u,y=-0.22+0.25*Math.sin(u*2.4)-0.45*u*u,w=0.13*Math.sin(Math.PI*Math.pow(u,0.6))*(1-0.3*u),lat=t*w;
+    return[r*Math.cos(a)-lat*Math.sin(a),y+0.05*Math.abs(t)*w*8,r*Math.sin(a)+lat*Math.cos(a),0.45+0.55*u,Math.sin(s*5)*0.4]},1)}
+// Hip
+surf(10,24,(i,j,u,v)=>{const r=0.05+0.15*Math.sin(Math.PI*(0.3+0.7*u)),a=v*Math.PI*2;return[r*Math.cos(a),-0.25-0.4*u,r*Math.sin(a),0.5,0]},1);
+// Stem
+const stemPt=f=>[0.2*Math.sin(f*2.8),-0.65-1.6*f,0.1*(1-Math.cos(f*3))];
+surf(50,12,(i,j,u,v)=>{const p=stemPt(u),a=v*Math.PI*2,r=0.05-0.008*u;return[p[0]+r*Math.cos(a),p[1],p[2]+r*Math.sin(a),0.55+0.2*Math.sin(u*9),0]},1);
+// Thorns
+[[0.18,0.5],[0.4,3.7],[0.62,2.2]].forEach(([f,ph])=>{
+  const B=stemPt(f),d=nrm([Math.cos(ph),-0.4,Math.sin(ph)]),p1=[-Math.sin(ph),0,Math.cos(ph)],p2=cross(d,p1);
+  surf(6,10,(i,j,u,v)=>{const a=v*Math.PI*2,q=0.035*(1-u),s=0.045;
+    return[B[0]+d[0]*(s+u*0.22)+(p1[0]*Math.cos(a)+p2[0]*Math.sin(a))*q,B[1]+d[1]*(s+u*0.22)+(p1[1]*Math.cos(a)+p2[1]*Math.sin(a))*q,B[2]+d[2]*(s+u*0.22)+(p1[2]*Math.cos(a)+p2[2]*Math.sin(a))*q,0.6,0.2]},1)});
+// Serrated leaflets and compound leaves
+function leaflet(O,F,len,W,droop){
+  F=nrm(F);const S=nrm(cross(F,[0,1,0])),U=cross(S,F);
+  surf(24,14,(i,j,u,v)=>{const t=v*2-1,w=W*Math.sin(Math.PI*Math.pow(u,0.75))*(1+0.08*Math.sin(u*70)*Math.abs(t)),lift=0.45*Math.abs(t)*w,d=droop*u*u*len;
+    return[O[0]+F[0]*u*len+S[0]*t*w+U[0]*lift,O[1]+F[1]*u*len+S[1]*t*w+U[1]*lift-d,O[2]+F[2]*u*len+S[2]*t*w+U[2]*lift,0.5+0.5*(1-Math.abs(t)*0.35),Math.sin(i*0.7+j)*0.3]},1)}
+function leaf(f,ph,sc){
+  const B=stemPt(f),F0=nrm([Math.cos(ph),0.4,Math.sin(ph)]),at=(m)=>B.map((b,i)=>b+F0[i]*m);
+  leaflet(B,F0,0.55*sc,0.018,0.1);
+  leaflet(at(0.55*sc),F0,0.75*sc,0.26*sc,0.3);
+  [-0.95,0.95].forEach(al=>{const c=Math.cos(al),s=Math.sin(al);
+    leaflet(at(0.38*sc),[F0[0]*c-F0[2]*s,F0[1],F0[0]*s+F0[2]*c],0.55*sc,0.2*sc,0.25)})}
+leaf(0.28,0.4,1);leaf(0.62,3.6,0.9);leaf(0.85,5.4,0.65);
+const NPT=G.x.length;
+const PX=Float32Array.from(G.x),PY=Float32Array.from(G.y),PZ=Float32Array.from(G.z),NX=Float32Array.from(G.nx),NY=Float32Array.from(G.ny),NZ=Float32Array.from(G.nz),TY=Uint8Array.from(G.t),AO=Float32Array.from(G.ao),TN=Float32Array.from(G.tn);
+
+// ---------- state ----------
+const el=document.getElementById('rose');
+let COLS=116,ROWS=58,zb,cb,chb;
+let yaw=0.4,pitch=0.5,zoom=1,spin=true,theme=0,vy=0,vp=0,drag=false,lx=0,ly=0,pd=0;
+function setGrid(){
+  COLS=innerWidth<600?84:116;ROWS=innerWidth<600?64:58;
+  const fs=Math.max(3,Math.min((innerWidth-20)/(COLS*0.6),(innerHeight-120)/ROWS));
+  el.style.fontSize=fs+'px';
+  zb=new Float32Array(COLS*ROWS);cb=new Int16Array(COLS*ROWS);chb=new Uint8Array(COLS*ROWS);
+}
+setGrid();addEventListener('resize',setGrid);
+const Lg=nrm([-0.35,0.6,0.75]),Hv=nrm([Lg[0],Lg[1],Lg[2]+1]);
+
+function render(){
+  zb.fill(-1e9);cb.fill(-1);
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const S=ROWS/3.7*zoom,D=8,hx=COLS/2,hy=ROWS/2,pal=THEMES[theme].pal;
+  for(let i=0;i<NPT;i++){
+    const x=PX[i],y=PY[i]+0.75,z=PZ[i];
+    const rx=x*cy+z*sy,rz=-x*sy+z*cy,ty=y*cp-rz*sp,tz=y*sp+rz*cp;
+    const k=D/(D-tz),sx=Math.round(hx+rx*k*S*1.667),sY=Math.round(hy-ty*k*S);
+    if(sx<0||sx>=COLS||sY<0||sY>=ROWS)continue;
+    const idx=sY*COLS+sx;if(tz<=zb[idx])continue;
+    let a=NX[i],b=NY[i],c=NZ[i];
+    const nx=a*cy+c*sy,nz0=-a*sy+c*cy,ny=b*cp-nz0*sp,nz=b*sp+nz0*cp;
+    const sg=nz<0?-1:1,X=nx*sg,Y=ny*sg,Z=nz*sg;
+    const leafy=TY[i]===1;
+    const d=Math.max(0,X*Lg[0]+Y*Lg[1]+Z*Lg[2]);
+    const fill=Math.max(0,X*0.6-Y*0.5+Z*0.4)*0.22;
+    const sp2=Math.pow(Math.max(0,X*Hv[0]+Y*Hv[1]+Z*Hv[2]),leafy?28:14)*(leafy?0.6:0.3);
+    const rim=Math.pow(1-Z,2)*0.3;
+    let lum=(0.13+0.74*d+fill+sp2+rim*0.6)*AO[i];
+    lum*=0.82+0.18*Math.max(0,Math.min(1,(tz+2.2)/4.4));
+    lum=Math.pow(Math.max(0,Math.min(1,lum)),0.85);
+    zb[idx]=tz;
+    chb[idx]=Math.max(1,Math.round(lum*(CH.length-1)));
+    const ci=Math.max(0,Math.min(NP-1,Math.round((lum+TN[i]*0.07)*(NP-1))));
+    cb[idx]=leafy?NP+ci:ci;
+  }
+  const out=[];
+  for(let r=0;r<ROWS;r++){
+    let cur=-2,run='';
+    for(let c=0;c<COLS;c++){
+      const idx=r*COLS+c,col=cb[idx],ch=col<0?' ':CH[chb[idx]];
+      if(col!==cur){
+        if(run)out.push(cur<0?run:'<span style="color:'+(cur>=NP?LEAF[cur-NP]:pal[cur])+'">'+run+'</span>');
+        cur=col;run=ch}else run+=ch}
+    if(run)out.push(cur<0?run:'<span style="color:'+(cur>=NP?LEAF[cur-NP]:pal[cur])+'">'+run+'</span>');
+    out.push('\n')}
+  el.innerHTML=out.join('');
+}
+function frame(){
+  if(!drag){yaw+=vy;pitch=Math.max(-1.55,Math.min(1.55,pitch+vp));vy*=0.93;vp*=0.93;if(spin)yaw+=0.011}
+  render();requestAnimationFrame(frame)
+}
+frame();
+
+// ---------- input ----------
+function down(x,y){drag=true;lx=x;ly=y;vy=vp=0}
+function move(x,y){if(!drag)return;const dx=x-lx,dy=y-ly;yaw+=dx*0.011;pitch=Math.max(-1.55,Math.min(1.55,pitch+dy*0.011));vy=dx*0.0011;vp=dy*0.0011;lx=x;ly=y}
+const up=()=>{drag=false};
+addEventListener('mousedown',e=>{if(e.target.tagName!=='BUTTON')down(e.clientX,e.clientY)});
+addEventListener('mousemove',e=>move(e.clientX,e.clientY));
+addEventListener('mouseup',up);
+addEventListener('touchstart',e=>{if(e.target.tagName==='BUTTON')return;if(e.touches.length===1)down(e.touches[0].clientX,e.touches[0].clientY);else if(e.touches.length===2){drag=false;pd=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY)}},{passive:true});
+addEventListener('touchmove',e=>{if(e.touches.length===1)move(e.touches[0].clientX,e.touches[0].clientY);else if(e.touches.length===2){const n=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);zoom=Math.max(0.6,Math.min(2,zoom*n/pd));pd=n}},{passive:true});
+addEventListener('touchend',up);
+addEventListener('wheel',e=>{zoom=Math.max(0.6,Math.min(2,zoom-e.deltaY*0.001))},{passive:true});
+const $=id=>document.getElementById(id);
+$('bSpin').onclick=()=>{spin=!spin;$('bSpin').textContent=spin?'Pause spin':'Resume spin'};
+$('bGlow').onclick=()=>{const g=el.classList.toggle('glow');$('bGlow').textContent='Glow: '+(g?'on':'off')};
+$('bTheme').onclick=()=>{theme=(theme+1)%THEMES.length;const t=THEMES[theme];$('bTheme').textContent='Theme: '+t.name;document.documentElement.style.setProperty('--ac',t.ac)};
+$('bReset').onclick=()=>{yaw=0.4;pitch=0.5;zoom=1;vy=vp=0};
+</script>
+</body>
+</html>
